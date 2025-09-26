@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Horror Hospital FPS with Brighter Room Lights</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: black; display: flex; justify-content: center; align-items: center; height: 100vh; }
+    canvas { display: block; }
+  </style>
+</head>
+<body>
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script>
+const WIDTH = 1600;
+const HEIGHT = 700;
+
+const scene = new THREE.Scene();
+
+// Camera
+const camera = new THREE.PerspectiveCamera(75, WIDTH / HEIGHT, 0.1, 1000);
+camera.position.set(0, 1.5, 0);
+
+// Yaw container for left/right rotation
+const yawObject = new THREE.Object3D();
+yawObject.add(camera);
+scene.add(yawObject);
+
+// Renderer
+const renderer = new THREE.WebGLRenderer();
+renderer.setSize(WIDTH, HEIGHT);
+document.body.appendChild(renderer.domElement);
+
+// Ambient light for the whole scene (very dim)
+scene.add(new THREE.AmbientLight(0x050505));
+
+// Flashlight attached directly to camera
+const flashlight = new THREE.SpotLight(0xaaaaaa, 8, 50, Math.PI / 10, 0.5, 2);
+flashlight.castShadow = true;
+flashlight.position.set(0, 0, 0);
+flashlight.target.position.set(0, 0, -1);
+camera.add(flashlight);
+camera.add(flashlight.target);
+
+// Materials
+const floorMat = new THREE.MeshPhongMaterial({ color: 0x222222 });
+const wallMat = new THREE.MeshPhongMaterial({ color: 0x555555 });
+const ceilingMat = new THREE.MeshPhongMaterial({ color: 0x333333 });
+
+// Array to store wall bounding boxes for collision
+const walls = [];
+
+// Function to create a room with brighter ceiling light
+function createRoom(x, z, width, depth) {
+  // Floor
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(width, depth), floorMat);
+  floor.rotation.x = -Math.PI/2;
+  floor.position.set(x, 0, z);
+  scene.add(floor);
+
+  // Ceiling
+  const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(width, depth), ceilingMat);
+  ceiling.rotation.x = Math.PI/2;
+  ceiling.position.set(x, 3, z);
+  scene.add(ceiling);
+
+  const wallThickness = 0.5;
+
+  // Helper to add walls and bounding boxes
+  function addWall(mesh) {
+    scene.add(mesh);
+    walls.push(new THREE.Box3().setFromObject(mesh));
+  }
+
+  // Left wall
+  const leftWall = new THREE.Mesh(new THREE.BoxGeometry(wallThickness, 3, depth), wallMat);
+  leftWall.position.set(x - width/2, 1.5, z);
+  addWall(leftWall);
+
+  // Right wall
+  const rightWall = new THREE.Mesh(new THREE.BoxGeometry(wallThickness, 3, depth), wallMat);
+  rightWall.position.set(x + width/2, 1.5, z);
+  addWall(rightWall);
+
+  // Back wall
+  const backWall = new THREE.Mesh(new THREE.BoxGeometry(width, 3, wallThickness), wallMat);
+  backWall.position.set(x, 1.5, z - depth/2);
+  addWall(backWall);
+
+  // Front wall with 2-unit-wide door
+  const frontLeft = new THREE.Mesh(new THREE.BoxGeometry((width-2)/2, 3, wallThickness), wallMat);
+  frontLeft.position.set(x - (width-2)/4 -1, 1.5, z + depth/2);
+  addWall(frontLeft);
+
+  const frontRight = new THREE.Mesh(new THREE.BoxGeometry((width-2)/2, 3, wallThickness), wallMat);
+  frontRight.position.set(x + (width-2)/4 +1, 1.5, z + depth/2);
+  addWall(frontRight);
+
+  // Brighter room light near ceiling
+  const dimLight = new THREE.PointLight(0x888888, 5, 50); // color, intensity, distance
+  dimLight.position.set(x, 2.8, z);
+  scene.add(dimLight);
+}
+
+// Hospital layout
+createRoom(0, 0, 10, 10);      // Room 1
+createRoom(0, 12, 10, 10);     // Room 2
+createRoom(12, 0, 10, 10);     // Room 3
+createRoom(-12, 0, 10, 10);    // Room 4
+createRoom(0, -12, 10, 10);    // Room 5
+
+// Corridor floor connecting Room 1 -> Room 2
+const corridor1 = new THREE.Mesh(new THREE.BoxGeometry(4, 0.1, 4), floorMat);
+corridor1.rotation.x = -Math.PI/2;
+corridor1.position.set(0, 0, 6);
+scene.add(corridor1);
+
+// Movement
+const keys = {};
+window.addEventListener("keydown", e => keys[e.key.toLowerCase()] = true);
+window.addEventListener("keyup", e => keys[e.key.toLowerCase()] = false);
+
+// Pointer lock
+document.body.addEventListener("click", () => {
+  renderer.domElement.requestPointerLock();
+});
+
+// Pitch & yaw
+let pitch = 0;
+document.addEventListener("mousemove", event => {
+  if (document.pointerLockElement === renderer.domElement) {
+    yawObject.rotation.y -= event.movementX * 0.002;
+    pitch -= event.movementY * 0.002;
+    pitch = Math.max(-Math.PI/2, Math.min(Math.PI/2, pitch));
+    camera.rotation.x = pitch;
+  }
+});
+
+// Collision detection
+function checkCollision(newPos) {
+  const playerBox = new THREE.Box3(
+    new THREE.Vector3(newPos.x - 0.3, newPos.y - 1.5, newPos.z - 0.3),
+    new THREE.Vector3(newPos.x + 0.3, newPos.y + 1.5, newPos.z + 0.3)
+  );
+  for (let wall of walls) {
+    if (wall.intersectsBox(playerBox)) return true;
+  }
+  return false;
+}
+
+// Animation loop
+function animate() {
+  requestAnimationFrame(animate);
+
+  // Player movement
+  const speed = 0.1;
+  const dir = new THREE.Vector3();
+  if (keys["w"]) dir.z -= 1;
+  if (keys["s"]) dir.z += 1;
+  if (keys["a"]) dir.x -= 1;
+  if (keys["d"]) dir.x += 1;
+
+  if (dir.length() > 0) {
+    dir.normalize();
+    const move = new THREE.Vector3(dir.x, 0, dir.z).applyAxisAngle(new THREE.Vector3(0,1,0), yawObject.rotation.y).multiplyScalar(speed);
+    const newPos = yawObject.position.clone().add(move);
+    if (!checkCollision(newPos)) {
+      yawObject.position.copy(newPos);
+    }
+  }
+
+  camera.position.y = 1.5; // keep player grounded
+  renderer.render(scene, camera);
+}
+
+animate();
+</script>
+</body>
+</html>
