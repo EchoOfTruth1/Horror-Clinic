@@ -1,13 +1,66 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Horror Hospital FPS with Brighter Room Lights</title>
+  <title>Horror Hospital FPS Expanded</title>
   <style>
-    body { margin: 0; overflow: hidden; background: black; display: flex; justify-content: center; align-items: center; height: 100vh; }
+    body { 
+      margin: 0; 
+      overflow: hidden; 
+      background: black; 
+      display: flex; 
+      justify-content: center; 
+      align-items: center; 
+      height: 100vh; 
+    }
     canvas { display: block; }
+    /* Battery bar container */
+    #battery-container {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      width: 120px;
+      height: 40px;
+      border: 2px solid #888;
+      display: flex;
+      justify-content: space-between;
+      padding: 4px;
+      background-color: #111;
+    }
+    .battery-segment {
+      flex: 1;
+      margin: 0 2px;
+      background-color: #444;
+    }
+    .battery-segment.full {
+      background-color: #0f0;
+    }
+    /* Sanity bar container */
+    #sanity-container {
+      position: absolute;
+      top: 70px;
+      right: 20px;
+      width: 120px;
+      height: 20px;
+      border: 2px solid #888;
+      background-color: #111;
+    }
+    #sanity-fill {
+      width: 100%;
+      height: 100%;
+      background-color: #ff0;
+    }
   </style>
 </head>
 <body>
+<div id="battery-container">
+  <div class="battery-segment full" id="battery1"></div>
+  <div class="battery-segment full" id="battery2"></div>
+  <div class="battery-segment full" id="battery3"></div>
+  <div class="battery-segment full" id="battery4"></div>
+</div>
+<div id="sanity-container">
+  <div id="sanity-fill"></div>
+</div>
 <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
 <script>
 const WIDTH = 1600;
@@ -44,12 +97,17 @@ camera.add(flashlight.target);
 const floorMat = new THREE.MeshPhongMaterial({ color: 0x222222 });
 const wallMat = new THREE.MeshPhongMaterial({ color: 0x555555 });
 const ceilingMat = new THREE.MeshPhongMaterial({ color: 0x333333 });
+const shelfMat = new THREE.MeshPhongMaterial({ color: 0x666666 });
+const bulbMat = new THREE.MeshPhongMaterial({ color: 0xffff00, emissive: 0xffff00 });
 
 // Array to store wall bounding boxes for collision
 const walls = [];
 
+// Array to store interactable items
+const items = [];
+
 // Function to create a room with brighter ceiling light
-function createRoom(x, z, width, depth) {
+function createRoom(x, z, width, depth, addShelves=false) {
   // Floor
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(width, depth), floorMat);
   floor.rotation.x = -Math.PI/2;
@@ -95,23 +153,40 @@ function createRoom(x, z, width, depth) {
   addWall(frontRight);
 
   // Brighter room light near ceiling
-  const dimLight = new THREE.PointLight(0x888888, 5, 50); // color, intensity, distance
+  const dimLight = new THREE.PointLight(0x888888, 5, 50); 
   dimLight.position.set(x, 2.8, z);
   scene.add(dimLight);
+
+  // Optional shelves and bulb
+  if(addShelves){
+    const shelf = new THREE.Mesh(new THREE.BoxGeometry(2,0.5,1), shelfMat);
+    shelf.position.set(x, 0.5, z);
+    scene.add(shelf);
+    
+    const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.2, 16, 16), bulbMat);
+    bulb.position.set(x, 1.2, z);
+    scene.add(bulb);
+    items.push({mesh: bulb, picked: false});
+  }
 }
 
 // Hospital layout
-createRoom(0, 0, 10, 10);      // Room 1
-createRoom(0, 12, 10, 10);     // Room 2
-createRoom(12, 0, 10, 10);     // Room 3
-createRoom(-12, 0, 10, 10);    // Room 4
-createRoom(0, -12, 10, 10);    // Room 5
+createRoom(0, 0, 10, 10);       // Room 1
+createRoom(0, 12, 10, 10);      // Room 2
+createRoom(12, 0, 10, 10);      // Room 3
+createRoom(-12, 0, 10, 10);     // Room 4
+createRoom(0, -12, 10, 10);     // Room 5
+createRoom(12, 12, 10, 10, true); // Room 6 with shelves & bulb
 
 // Corridor floor connecting Room 1 -> Room 2
 const corridor1 = new THREE.Mesh(new THREE.BoxGeometry(4, 0.1, 4), floorMat);
 corridor1.rotation.x = -Math.PI/2;
 corridor1.position.set(0, 0, 6);
 scene.add(corridor1);
+
+// Battery and sanity values
+let battery = 100; // 0-100
+let sanity = 100;  // 0-100
 
 // Movement
 const keys = {};
@@ -168,10 +243,41 @@ function animate() {
   }
 
   camera.position.y = 1.5; // keep player grounded
+
+  // Check item pickups
+  items.forEach(item=>{
+    if(!item.picked){
+      const distance = yawObject.position.distanceTo(item.mesh.position);
+      if(distance < 1.5){
+        item.picked = true;
+        battery = 100; // Refill battery when picked up
+        scene.remove(item.mesh);
+      }
+    }
+  });
+
+  // Battery drain over time
+  battery -= 0.02;
+  if(battery < 0) battery = 0;
+
+  // Sanity drain
+  sanity -= 0.005;
+  if(sanity < 0) sanity = 0;
+
+  // Update battery UI
+  document.getElementById("battery1").className = battery>=75 ? "battery-segment full":"battery-segment";
+  document.getElementById("battery2").className = battery>=50 ? "battery-segment full":"battery-segment";
+  document.getElementById("battery3").className = battery>=25 ? "battery-segment full":"battery-segment";
+  document.getElementById("battery4").className = battery>0 ? "battery-segment full":"battery-segment";
+
+  // Update sanity UI
+  document.getElementById("sanity-fill").style.width = sanity + "%";
+
   renderer.render(scene, camera);
 }
 
 animate();
+
 </script>
 </body>
 </html>
